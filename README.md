@@ -1,4 +1,4 @@
-** APS - Automatic Protection System **
+**APS - Automatic Protection System**
 
 ---
 
