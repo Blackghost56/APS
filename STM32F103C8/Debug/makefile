@@ -8,7 +8,6 @@ RM := rm -rf
 
 # All of the sources participating in the build are defined here
 -include sources.mk
--include startup/subdir.mk
 -include Src/subdir.mk
 -include Drivers/STM32F1xx_HAL_Driver/Src/subdir.mk
 -include subdir.mk
@@ -45,10 +44,9 @@ clean:
 	-@echo ' '
 
 post-build:
-	-@echo 'Generating binary and Printing size information:'
-	arm-none-eabi-objcopy -O binary "AZS.elf" "AZS.bin"
-	arm-none-eabi-size "AZS.elf"
+	-@echo 'Generating hex and Printing size information:'
 	arm-none-eabi-objcopy -O ihex "AZS.elf" "AZS.hex"
+	arm-none-eabi-size "AZS.elf"
 	-@echo ' '
 
 .PHONY: all clean dependents

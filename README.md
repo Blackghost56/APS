@@ -31,6 +31,6 @@ Project structure:
 * Task:									[\data\task.docx](https://github.com/Blackghost56/APS/blob/master/data/task.docx)
 * Check list:							[\data\check_list.docx](https://github.com/Blackghost56/APS/blob/master/data/check_list.docx)
 * Short description						[\data\short_description.docx](https://github.com/Blackghost56/APS/blob/master/data/short_description.docx)
-* Project for STM32F103C8 (ver.0.0.1)	[\STM32F103C8](https://github.com/Blackghost56/APS/blob/master/STM32F103C8/)
-* Project for STM32F407VG (ver.0.0.1)	[\STM32F407VG](https://github.com/Blackghost56/APS/blob/master/STM32F103C8/)
+* Project for STM32F103C8 				[\STM32F103C8](https://github.com/Blackghost56/APS/blob/master/STM32F103C8/)
+
 

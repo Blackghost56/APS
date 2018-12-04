@@ -1,7 +1,8 @@
+
 /**
   ******************************************************************************
-  * File Name          : main.c
-  * Description        : Main program body
+  * @file           : main.c
+  * @brief          : Main program body
   ******************************************************************************
   ** This notice applies to any and all portions of this file
   * that are not between comment pairs USER CODE BEGIN and
@@ -35,21 +36,23 @@
   *
   ******************************************************************************
   */
-
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 #include "stm32f1xx_hal.h"
 
 /* USER CODE BEGIN Includes */
+#include "filter.h"
 
 /* USER CODE END Includes */
 
 /* Private variables ---------------------------------------------------------*/
 ADC_HandleTypeDef hadc1;
+DMA_HandleTypeDef hdma_adc1;
 
 CAN_HandleTypeDef hcan;
 
 TIM_HandleTypeDef htim2;
+TIM_HandleTypeDef htim3;
 
 /* USER CODE BEGIN PV */
 /* Private variables ---------------------------------------------------------*/
@@ -69,37 +72,34 @@ TIM_HandleTypeDef htim2;
 #define				SENS_I_VCC					3.3								// Volt
 #define				SENS_I_SLOPE				26.4e-3							// Volt per 1 Ampere
 #define				SENS_I_LIM_DEF				1.0								// Ampere
-#define				SENS_I_MAX_CURRENT			50.0							// Ampere, see datasheet LM60
+#define				SENS_I_MAX_CURRENT			50.0							// Ampere, see datasheet
 #define				SENS_TEMP_SLOPE				6.25e-3							// Volt per 1 degree
 #define				SWITCH_QUANT				0.25							// Ampere
 
-
-#define				ADC_IN_PRESCALER			ADC_IN_R2 / (ADC_IN_R1 + ADC_IN_R2)
-#define				ADC_OUT_PRESCALER			ADC_OUT_R2 / (ADC_OUT_R1 + ADC_OUT_R2)
-#define				ADC_QUANT_PER_VOLT			(float)ADC_NUM_QUANT / ADC_REF_V
-#define				SENS_I_LIM_DEF_ADC			(uint16_t)(SENS_I_LIM_DEF * SENS_I_SLOPE * ADC_QUANT_PER_VOLT)	// Ampere
-#define				SENS_I_MAX_CURRENT_ADC		(uint16_t)(SENS_I_MAX_CURRENT * SENS_I_SLOPE * ADC_QUANT_PER_VOLT)	// Ampere
-#define				SENS_I_VOUT_Q				SENS_I_VCC / 2.0
-#define				SENS_I_VOUT_Q_ADC			(uint16_t)(SENS_I_VOUT_Q * ADC_QUANT_PER_VOLT)
+#define				ADC_IN_PRESCALER			(float)ADC_IN_R2 / (float)(ADC_IN_R1 + ADC_IN_R2)
+#define				ADC_OUT_PRESCALER			(float)ADC_OUT_R2 / (float)(ADC_OUT_R1 + ADC_OUT_R2)
+#define 			SENS_I_LIM_DEF_A			((float)SENS_I_LIM_DEF * (float)SENS_I_SLOPE)	// Ampere
+#define				SENS_I_MAX_CURRENT_A		((float)SENS_I_MAX_CURRENT * (float)SENS_I_SLOPE)	// Ampere
+#define				SENS_I_VOUT_Q				(float)SENS_I_VCC / 2.0
 #define 			GATE_ENABLE					1
 #define 			GATE_DISABLE				0
-#define				ADC_CONVERSION_COMPLETE		1
-#define				ADC_CONVERSION_EXPECT		0
+#define				ADC_SAMPLE_RATE				10000
 
 
 uint32_t 			Device_ID = 				DEVICE_ID_DEF;					// Set device ID  (CAN bus)
 uint32_t 			Remote_device_ID =			REMOTE_DEVICE_ID_DEF;			// Set remote device ID (CAN bus)
 uint8_t				Gate_state =				GATE_DISABLE;
-uint16_t			Lim_I_up =					SENS_I_VOUT_Q_ADC + SENS_I_LIM_DEF_ADC;		// Forward current limit
-uint16_t			Lim_I_down =				SENS_I_VOUT_Q_ADC - SENS_I_LIM_DEF_ADC;		// Backward current limit
-uint16_t			Lim_in_V_down =				(uint16_t)(ADC_IN_PRESCALER * LIM_IN_V_DOWN_DEF * ADC_QUANT_PER_VOLT);
-uint16_t			Lim_in_V_up =				(uint16_t)(ADC_IN_PRESCALER * LIM_IN_V_UP_DEF * ADC_QUANT_PER_VOLT);
-uint16_t			Lim_out_V_down =			(uint16_t)(ADC_OUT_PRESCALER * LIM_OUT_V_DOWN_DEF * ADC_QUANT_PER_VOLT);
-uint16_t			Lim_out_V_up =				(uint16_t)(ADC_OUT_PRESCALER * LIM_OUT_V_UP_DEF * ADC_QUANT_PER_VOLT);
-uint8_t				ADC_conversion_status = 	ADC_CONVERSION_EXPECT;
+float 				Lim_in_V_down =				((float)ADC_IN_PRESCALER * (float)LIM_IN_V_DOWN_DEF);
+float				Lim_in_V_up =				((float)ADC_IN_PRESCALER * (float)LIM_IN_V_UP_DEF);
+float				Lim_out_V_down =			((float)ADC_OUT_PRESCALER * (float)LIM_OUT_V_DOWN_DEF);
+float				Lim_out_V_up =				((float)ADC_OUT_PRESCALER * (float)LIM_OUT_V_UP_DEF);
+float				Lim_I_up =					SENS_I_VOUT_Q + SENS_I_LIM_DEF_A;		// Forward current limit
+float				Lim_I_down =				SENS_I_VOUT_Q - SENS_I_LIM_DEF_A;		// Backward current limit
 CanTxMsgTypeDef 	CAN_Tx_Buffer;
 CanRxMsgTypeDef 	CAN_Rx_Buffer;
 uint16_t 			ADC_Data[4];
+float	 			ADC_Data_f[4];
+
 
 
 /* USER CODE END PV */
@@ -107,9 +107,11 @@ uint16_t 			ADC_Data[4];
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
+static void MX_DMA_Init(void);
 static void MX_CAN_Init(void);
 static void MX_ADC1_Init(void);
 static void MX_TIM2_Init(void);
+static void MX_TIM3_Init(void);
 
 /* USER CODE BEGIN PFP */
 /* Private function prototypes -----------------------------------------------*/
@@ -119,9 +121,12 @@ void Gate_set(uint8_t state);
 void Gate_toggle(void);
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin);
 uint8_t Switch_read(void);
-void HAL_ADCEx_InjectedConvCpltCallback(ADC_HandleTypeDef* hadc1);
+//void HAL_ADCEx_InjectedConvCpltCallback(ADC_HandleTypeDef* hadc1);
 void HAL_CAN_RxCpltCallback(CAN_HandleTypeDef* CanHandle);
 void Set_current_lim(void);
+void ADC_check(uint16_t *ADC_Data, float *ADC_Data_f);
+void Sample_rate_set(uint16_t sample_rate);
+void CAN_ADCdata_send_f(float *ADC_array_f, uint8_t array_size);
 
 
 /* USER CODE END PFP */
@@ -130,9 +135,13 @@ void Set_current_lim(void);
 
 /* USER CODE END 0 */
 
+/**
+  * @brief  The application entry point.
+  *
+  * @retval None
+  */
 int main(void)
 {
-
   /* USER CODE BEGIN 1 */
 
   /* USER CODE END 1 */
@@ -156,19 +165,25 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
+  MX_DMA_Init();
   MX_CAN_Init();
   MX_ADC1_Init();
   MX_TIM2_Init();
-
+  MX_TIM3_Init();
   /* USER CODE BEGIN 2 */
+	
+	Sample_rate_set(ADC_SAMPLE_RATE);
 
   Set_current_lim();
-
   CAN_filter_set();
   hcan.pRxMsg = &CAN_Rx_Buffer;
   HAL_CAN_Receive_IT(&hcan, CAN_FIFO0);
-
-  HAL_ADCEx_InjectedStart_IT(&hadc1);
+	HAL_NVIC_DisableIRQ(DMA1_Channel1_IRQn);
+  HAL_ADC_Start_DMA(&hadc1,(uint32_t*) &ADC_Data, 4);
+  HAL_TIM_Base_Start_IT(&htim3);
+  
+	//Gate_set(GATE_ENABLE);
+  //HAL_ADCEx_InjectedStart_IT(&hadc1);
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -178,20 +193,24 @@ int main(void)
   /* USER CODE END WHILE */
 
   /* USER CODE BEGIN 3 */
-	  if (ADC_conversion_status == ADC_CONVERSION_COMPLETE)
-	  {
-		  CAN_ADCdata_send(ADC_Data, sizeof(ADC_Data)/sizeof(uint16_t));
-		  ADC_conversion_status = ADC_CONVERSION_EXPECT;
-	  }
+	  //if (ADC_conversion_status == ADC_CONVERSION_COMPLETE)
+	  //{
+		  CAN_ADCdata_send_f(ADC_Data_f, sizeof(ADC_Data)/sizeof(uint16_t));
+		  //ADC_conversion_status = ADC_CONVERSION_EXPECT;
+	  //}
 	  HAL_Delay(CAN_TIME_TX_DATA);
-
+		//Gate_set(GATE_ENABLE);
+		//HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_1);
+		//HAL_Delay(10);
   }
   /* USER CODE END 3 */
 
 }
 
-/** System Clock Configuration
-*/
+/**
+  * @brief System Clock Configuration
+  * @retval None
+  */
 void SystemClock_Config(void)
 {
 
@@ -250,60 +269,55 @@ void SystemClock_Config(void)
 static void MX_ADC1_Init(void)
 {
 
-  ADC_InjectionConfTypeDef sConfigInjected;
+  ADC_ChannelConfTypeDef sConfig;
 
     /**Common config 
     */
   hadc1.Instance = ADC1;
   hadc1.Init.ScanConvMode = ADC_SCAN_ENABLE;
-  hadc1.Init.ContinuousConvMode = DISABLE;
+  hadc1.Init.ContinuousConvMode = ENABLE;
   hadc1.Init.DiscontinuousConvMode = DISABLE;
   hadc1.Init.ExternalTrigConv = ADC_SOFTWARE_START;
   hadc1.Init.DataAlign = ADC_DATAALIGN_RIGHT;
-  hadc1.Init.NbrOfConversion = 1;
+  hadc1.Init.NbrOfConversion = 4;
   if (HAL_ADC_Init(&hadc1) != HAL_OK)
   {
     _Error_Handler(__FILE__, __LINE__);
   }
 
-    /**Configure Injected Channel 
+    /**Configure Regular Channel 
     */
-  sConfigInjected.InjectedChannel = ADC_CHANNEL_0;
-  sConfigInjected.InjectedRank = 1;
-  sConfigInjected.InjectedNbrOfConversion = 4;
-  sConfigInjected.InjectedSamplingTime = ADC_SAMPLETIME_1CYCLE_5;
-  sConfigInjected.ExternalTrigInjecConv = ADC_INJECTED_SOFTWARE_START;
-  sConfigInjected.AutoInjectedConv = DISABLE;
-  sConfigInjected.InjectedDiscontinuousConvMode = DISABLE;
-  sConfigInjected.InjectedOffset = 0;
-  if (HAL_ADCEx_InjectedConfigChannel(&hadc1, &sConfigInjected) != HAL_OK)
+  sConfig.Channel = ADC_CHANNEL_0;
+  sConfig.Rank = ADC_REGULAR_RANK_1;
+  sConfig.SamplingTime = ADC_SAMPLETIME_1CYCLE_5;
+  if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
   {
     _Error_Handler(__FILE__, __LINE__);
   }
 
-    /**Configure Injected Channel 
+    /**Configure Regular Channel 
     */
-  sConfigInjected.InjectedChannel = ADC_CHANNEL_4;
-  sConfigInjected.InjectedRank = 2;
-  if (HAL_ADCEx_InjectedConfigChannel(&hadc1, &sConfigInjected) != HAL_OK)
+  sConfig.Channel = ADC_CHANNEL_4;
+  sConfig.Rank = ADC_REGULAR_RANK_2;
+  if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
   {
     _Error_Handler(__FILE__, __LINE__);
   }
 
-    /**Configure Injected Channel 
+    /**Configure Regular Channel 
     */
-  sConfigInjected.InjectedChannel = ADC_CHANNEL_5;
-  sConfigInjected.InjectedRank = 3;
-  if (HAL_ADCEx_InjectedConfigChannel(&hadc1, &sConfigInjected) != HAL_OK)
+  sConfig.Channel = ADC_CHANNEL_5;
+  sConfig.Rank = ADC_REGULAR_RANK_3;
+  if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
   {
     _Error_Handler(__FILE__, __LINE__);
   }
 
-    /**Configure Injected Channel 
+    /**Configure Regular Channel 
     */
-  sConfigInjected.InjectedChannel = ADC_CHANNEL_6;
-  sConfigInjected.InjectedRank = 4;
-  if (HAL_ADCEx_InjectedConfigChannel(&hadc1, &sConfigInjected) != HAL_OK)
+  sConfig.Channel = ADC_CHANNEL_6;
+  sConfig.Rank = ADC_REGULAR_RANK_4;
+  if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
   {
     _Error_Handler(__FILE__, __LINE__);
   }
@@ -366,6 +380,54 @@ static void MX_TIM2_Init(void)
 
 }
 
+/* TIM3 init function */
+static void MX_TIM3_Init(void)
+{
+
+  TIM_ClockConfigTypeDef sClockSourceConfig;
+  TIM_MasterConfigTypeDef sMasterConfig;
+
+  htim3.Instance = TIM3;
+  htim3.Init.Prescaler = 71;
+  htim3.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim3.Init.Period = 999;
+  htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim3.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  if (HAL_TIM_Base_Init(&htim3) != HAL_OK)
+  {
+    _Error_Handler(__FILE__, __LINE__);
+  }
+
+  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
+  if (HAL_TIM_ConfigClockSource(&htim3, &sClockSourceConfig) != HAL_OK)
+  {
+    _Error_Handler(__FILE__, __LINE__);
+  }
+
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_UPDATE;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim3, &sMasterConfig) != HAL_OK)
+  {
+    _Error_Handler(__FILE__, __LINE__);
+  }
+
+}
+
+/** 
+  * Enable DMA controller clock
+  */
+static void MX_DMA_Init(void) 
+{
+  /* DMA controller clock enable */
+  __HAL_RCC_DMA1_CLK_ENABLE();
+
+  /* DMA interrupt init */
+  /* DMA1_Channel1_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA1_Channel1_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(DMA1_Channel1_IRQn);
+
+}
+
 /** Configure pins as 
         * Analog 
         * Input 
@@ -396,12 +458,13 @@ static void MX_GPIO_Init(void)
   /*Configure GPIO pin : PA2 */
   GPIO_InitStruct.Pin = GPIO_PIN_2;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
   /*Configure GPIO pin : PA8 */
   GPIO_InitStruct.Pin = GPIO_PIN_8;
-  GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING_FALLING;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
@@ -444,6 +507,39 @@ void CAN_ADCdata_send(uint16_t *ADC_array, uint8_t array_size)
 	uint8_t data_size = array_size * 2;
 	uint8_t buff[data_size];
 
+	uint8_t j = 0;
+	for (int i = 0; i < data_size; i += 2)
+	{
+		buff[i] = (uint8_t)(ADC_array[j]);
+		buff[i + 1] = (uint8_t)(ADC_array[j] >> 8);
+		j++;
+	}
+
+	CAN_Tx_Buffer.RTR = 	CAN_RTR_DATA;						// Data frame
+	CAN_Tx_Buffer.IDE = 	CAN_ID_STD;							// ID 11 bit
+	CAN_Tx_Buffer.DLC = 	data_size;							// Data length
+	CAN_Tx_Buffer.StdId = 	Remote_device_ID;
+
+	for (int i = 0; i < data_size; i++)
+	{
+		CAN_Tx_Buffer.Data[i] = buff[i];
+	}
+
+	hcan.pTxMsg = &CAN_Tx_Buffer;
+	HAL_CAN_Transmit_IT(&hcan);
+}
+
+void CAN_ADCdata_send_f(float *ADC_array_f, uint8_t array_size)
+{
+	volatile uint16_t ADC_array[array_size];
+	uint8_t data_size = array_size * 2;
+	uint8_t buff[data_size];
+
+	for (int i = 0; i < data_size; i++)
+	{
+		ADC_array[i] = (uint16_t)(ADC_array_f[i] / (float)ADC_REF_V * (float)ADC_NUM_QUANT);
+	}
+	
 	uint8_t j = 0;
 	for (int i = 0; i < data_size; i += 2)
 	{
@@ -514,6 +610,7 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
 	if (GPIO_Pin == GPIO_PIN_8)										// GPIOA PA8 Button
 	{
+		HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_1);
 		if (!(htim2.Instance->DIER & TIM_DIER_UIE))					// Protection, if TIM interrupt enable wont used HAL_TIM_Base_Start_IT
 		{
 			HAL_TIM_Base_Start_IT(&htim2);							// Enable TIM 50 ms, for eliminate the effect of "bounce contacts"
@@ -577,89 +674,127 @@ uint8_t Switch_read(void)
 	return value;
 }
 
-void HAL_ADCEx_InjectedConvCpltCallback(ADC_HandleTypeDef* hadc1)
-{
-	ADC_Data[0] = HAL_ADCEx_InjectedGetValue(hadc1,ADC_INJECTED_RANK_1);		// Get value PA0	(ADC Out)
-	ADC_Data[1] = HAL_ADCEx_InjectedGetValue(hadc1,ADC_INJECTED_RANK_2);		// Get value PA4	(ADC In)
-	ADC_Data[2] = HAL_ADCEx_InjectedGetValue(hadc1,ADC_INJECTED_RANK_3);		// Get value PA5	(ADC Sens current)
-	ADC_Data[3] = HAL_ADCEx_InjectedGetValue(hadc1,ADC_INJECTED_RANK_4);		// Get value PA6	(ADC temp)
-
-	if ((ADC_Data[0] < Lim_out_V_down) || (ADC_Data[0] > Lim_out_V_up))
-	{
-		Gate_set(GATE_DISABLE);
-	}
-
-	if ((ADC_Data[1] < Lim_in_V_down) || (ADC_Data[1] > Lim_in_V_up))
-	{
-		Gate_set(GATE_DISABLE);
-	}
-
-	if ((ADC_Data[2] < Lim_I_down) || (ADC_Data[2] > Lim_I_up))
-	{
-		Gate_set(GATE_DISABLE);
-	}
-
-	ADC_conversion_status = ADC_CONVERSION_COMPLETE;							// Flag for CAN ADC data send
-
-	HAL_ADCEx_InjectedStart_IT(hadc1);
-}
-
 void Set_current_lim(void)
 {
-	uint16_t lim = 0;
+	float lim = 0;
+	float sw_state = 0;
 
-	lim = (uint16_t)((float)Switch_read() * SWITCH_QUANT * SENS_I_SLOPE * ADC_QUANT_PER_VOLT);
-	if (lim > SENS_I_MAX_CURRENT_ADC)
-	{
-		lim = SENS_I_MAX_CURRENT_ADC;
-	}
-	Lim_I_up = SENS_I_VOUT_Q_ADC + lim;
-	Lim_I_down = SENS_I_VOUT_Q_ADC - lim;
+	sw_state = Switch_read();
+	lim = sw_state * (float)SWITCH_QUANT;
+	if (lim > SENS_I_MAX_CURRENT)
+		{
+			lim = SENS_I_MAX_CURRENT;
+		}
+	lim *= (float)SENS_I_SLOPE; 
+	Lim_I_up = SENS_I_VOUT_Q + lim;
+	Lim_I_down = SENS_I_VOUT_Q - lim;
 }
+
+void ADC_check(uint16_t *ADC_Data, float *ADC_Data_f)
+{
+	ADC_Data_f[0] = dFilter_1(ADC_Data[0] / (float)ADC_NUM_QUANT * (float)ADC_REF_V);
+	ADC_Data_f[1] = dFilter_2(ADC_Data[1] / (float)ADC_NUM_QUANT * (float)ADC_REF_V);
+	ADC_Data_f[2] = dFilter_3(ADC_Data[2] / (float)ADC_NUM_QUANT * (float)ADC_REF_V);
+	ADC_Data_f[3] = ADC_Data[3] / (float)ADC_NUM_QUANT * (float)ADC_REF_V;
+
+	if (((ADC_Data_f[0] < Lim_out_V_down) || (ADC_Data_f[0] > Lim_out_V_up)) && (Gate_state != GATE_DISABLE))
+	{
+				Gate_set(GATE_DISABLE);
+	}
+	if (((ADC_Data_f[1] < Lim_in_V_down) || (ADC_Data_f[1] > Lim_in_V_up)) && (Gate_state != GATE_DISABLE))
+	{
+				Gate_set(GATE_DISABLE);
+	}
+	if (((ADC_Data_f[2] < Lim_I_down) || (ADC_Data_f[2] > Lim_I_up)) && (Gate_state != GATE_DISABLE))
+	{
+				Gate_set(GATE_DISABLE);
+	}
+}
+
+void Sample_rate_set(uint16_t sample_rate)
+{
+	TIM_ClockConfigTypeDef sClockSourceConfig;
+  TIM_MasterConfigTypeDef sMasterConfig;
+	
+  HAL_TIM_Base_DeInit(&htim3);
+	
+	htim3.Instance = TIM3;
+  htim3.Init.Prescaler = 71;
+  htim3.Init.CounterMode = TIM_COUNTERMODE_UP;
+	
+	//-----------------
+	uint32_t clock = HAL_RCC_GetPCLK1Freq() * 2; // TIM3 clock = PCLK1 * 2  // MHz
+
+	uint32_t prescaler_freq = clock /(htim3.Init.Prescaler + 1);  // MHz
+
+	uint32_t period = (prescaler_freq/sample_rate) - 1;			// us
+
+	htim3.Init.Period = period;
+	//-----------------
+
+  htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim3.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  if (HAL_TIM_Base_Init(&htim3) != HAL_OK)
+  {
+    _Error_Handler(__FILE__, __LINE__);
+  }
+
+  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
+  if (HAL_TIM_ConfigClockSource(&htim3, &sClockSourceConfig) != HAL_OK)
+  {
+    _Error_Handler(__FILE__, __LINE__);
+  }
+
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_UPDATE;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim3, &sMasterConfig) != HAL_OK)
+  {
+    _Error_Handler(__FILE__, __LINE__);
+  }
+}
+
 
 /* USER CODE END 4 */
 
 /**
   * @brief  This function is executed in case of error occurrence.
-  * @param  None
+  * @param  file: The file name as string.
+  * @param  line: The line in file as a number.
   * @retval None
   */
-void _Error_Handler(char * file, int line)
+void _Error_Handler(char *file, int line)
 {
   /* USER CODE BEGIN Error_Handler_Debug */
   /* User can add his own implementation to report the HAL error return state */
   while(1) 
   {
   }
-  /* USER CODE END Error_Handler_Debug */ 
+  /* USER CODE END Error_Handler_Debug */
 }
 
-#ifdef USE_FULL_ASSERT
-
+#ifdef  USE_FULL_ASSERT
 /**
-   * @brief Reports the name of the source file and the source line number
-   * where the assert_param error has occurred.
-   * @param file: pointer to the source file name
-   * @param line: assert_param error line source number
-   * @retval None
-   */
+  * @brief  Reports the name of the source file and the source line number
+  *         where the assert_param error has occurred.
+  * @param  file: pointer to the source file name
+  * @param  line: assert_param error line source number
+  * @retval None
+  */
 void assert_failed(uint8_t* file, uint32_t line)
-{
+{ 
   /* USER CODE BEGIN 6 */
   /* User can add his own implementation to report the file name and line number,
     ex: printf("Wrong parameters value: file %s on line %d\r\n", file, line) */
   /* USER CODE END 6 */
-
 }
-
-#endif
-
-/**
-  * @}
-  */ 
+#endif /* USE_FULL_ASSERT */
 
 /**
   * @}
-*/ 
+  */
+
+/**
+  * @}
+  */
 
 /************************ (C) COPYRIGHT STMicroelectronics *****END OF FILE****/

@@ -17,5 +17,4 @@ C_DEPS :=
 SUBDIRS := \
 Drivers/STM32F1xx_HAL_Driver/Src \
 Src \
-startup \
 

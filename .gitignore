@@ -4,6 +4,10 @@
 *.pdf
 *.xmcd
 
+# Folder
+Debug/*
+STM32F407VG/*
+
 # Prerequisites
 *.d
 
